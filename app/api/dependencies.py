@@ -1,7 +1,7 @@
 from typing import AsyncGenerator
 from app.services.scraper import ScraperService
 from app.services.chat import ChatService
-from app.core.config import settings
+from app.core.config import settings, Settings
 
 NBA_SYSTEM_PROMPT = """You are an AI assistant specialized in sports betting analysis, working alongside a user who has practical experience but lacks formal academic training in statistics, data analysis, and game theory. Your role is to complement the user's knowledge, push them to do better, providing insights and analysis based on the given data. You will be analyzing various types of sports-related information, including game statistics, forecasts, injury reports, and news articles for sports like NBA, NFL, and soccer.
 
@@ -39,11 +39,15 @@ _chat_service = ChatService(
 )
 
 async def get_scraper_service() -> AsyncGenerator[ScraperService, None]:
-    service = ScraperService()
+    """
+    Dependency provider for ScraperService.
+    """
+    settings = Settings()
+    service = ScraperService(settings)
     try:
         yield service
     finally:
-        service.cleanup()
+        pass  # No cleanup needed for now
 
 async def get_chat_service() -> ChatService:
     """Return the singleton chat service instance"""

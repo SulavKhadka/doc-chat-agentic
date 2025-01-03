@@ -81,10 +81,7 @@ class ChatService:
             logger.error(f"System message preview: {self.system[:200]}...")
             return
             
-        before_docs, current_docs, after_docs = parts
-        logger.debug(f"Content before documents (first 100 chars): {before_docs[:100]}...")
-        logger.debug(f"Current documents section: {current_docs}")
-        logger.debug(f"Content after documents (first 100 chars): {after_docs[:100]}...")
+        before_docs, _, after_docs = parts
         
         # Combine all scraped content in XML format
         documents_content = ""
@@ -98,40 +95,44 @@ class ChatService:
             documents_content += '  </document>'
         
         # Create new system message preserving content before and after documents
-        self.system = f"{before_docs}<documents>\n{documents_content}\n</documents>{after_docs}"
-        logger.debug("New documents section created")
+        new_system = f"{before_docs}<documents>\n{documents_content}\n</documents>{after_docs}"
+        
+        # Update system property
+        self.system = new_system
         
         # Update in messages list
         if self.messages and self.messages[0]["role"] == "system":
             prev_tokens = self.messages_token_counts[0]
-            self.messages[0]["content"] = self.system
+            self.messages[0]["content"] = new_system
             # Recalculate token count
-            self.messages_token_counts[0] = len(self.tokenizer.encode(self.system))
+            new_tokens = len(self.tokenizer.encode(new_system))
+            self.messages_token_counts[0] = new_tokens
             self.total_messages_tokens = sum(self.messages_token_counts)
-            logger.info(f"Token count changed from {prev_tokens} to {self.messages_token_counts[0]}")
+            logger.info(f"Token count changed from {prev_tokens} to {new_tokens}")
         
         logger.info("=== UPDATING SYSTEM MESSAGE END ===")
+        logger.info(f"Updated system message preview: {new_system[:200]}...")
     
-    def add_url_content(self, url_entry: URLEntry) -> None:
-        """Add content from a URL to the conversation context"""
-        if not url_entry.content:
-            logger.warning(f"No content to add for URL: {url_entry.url}")
+    def update_context(self, url: str, content: str) -> None:
+        """Add or update content in the conversation context"""
+        if not content:
+            logger.warning(f"No content to add for URL: {url}")
             return
             
-        logger.info(f"Adding content from URL: {url_entry.url}")
+        logger.info(f"Adding/updating content from URL: {url}")
         
         # Store content
-        self.scraped_content[str(url_entry.url)] = url_entry.content
+        self.scraped_content[url] = content
         
         # Update system message
         self._update_system_message()
         
-        logger.info("=== FINAL ADD URL VERIFICATION ===")
-        logger.info(f"Current scraped content: {self.scraped_content}")
-        logger.info(f"System property: {self.system}")
+        logger.info("=== FINAL CONTEXT UPDATE VERIFICATION ===")
+        logger.info(f"Current scraped content URLs: {list(self.scraped_content.keys())}")
+        logger.info(f"System message preview: {self.system[:200]}...")
         if self.messages:
-            logger.info(f"Messages[0] content: {self.messages[0]['content']}")
-        logger.info("=== END FINAL ADD URL VERIFICATION ===")
+            logger.info(f"First message preview: {self.messages[0]['content'][:200]}...")
+        logger.info("=== END CONTEXT UPDATE VERIFICATION ===")
     
     def remove_url_content(self, url: str) -> None:
         """Remove content from a specific URL in the scraped pages data section"""
@@ -148,10 +149,10 @@ class ChatService:
             self._update_system_message()
             
             logger.info("=== FINAL REMOVE URL VERIFICATION ===")
-            logger.info(f"Current scraped content: {self.scraped_content}")
-            logger.info(f"System property: {self.system}")
+            logger.info(f"Current scraped content URLs: {list(self.scraped_content.keys())}")
+            logger.info(f"System message preview: {self.system[:200]}...")
             if self.messages:
-                logger.info(f"Messages[0] content: {self.messages[0]['content']}")
+                logger.info(f"First message preview: {self.messages[0]['content'][:200]}...")
             logger.info("=== END FINAL REMOVE URL VERIFICATION ===")
         else:
             logger.warning(f"URL {url} not found in scraped content")
@@ -159,15 +160,14 @@ class ChatService:
     def process_message(self, message: str) -> str:
         logger.info("Processing new message")
         logger.info("=== PROCESS MESSAGE START STATE ===")
-        logger.info(f"System property: {self.system}")
+        logger.info(f"System message preview: {self.system[:200]}...")
         if self.messages:
-            logger.info(f"Messages[0] content: {self.messages[0]['content']}")
+            logger.info(f"First message preview: {self.messages[0]['content'][:200]}...")
         logger.info("=== END PROCESS MESSAGE START STATE ===")
         
         # Ensure system message is intact
-        pattern = r'\[SCRAPED_PAGES_DATA\](.*?)\[/SCRAPED_PAGES_DATA\]'
-        match = re.search(pattern, self.system, re.DOTALL)
-        if not match:
+        pattern = r'(<documents>.*?</documents>)'
+        if not re.search(pattern, self.system, re.DOTALL):
             logger.error("System message corrupted, attempting to restore from messages list")
             if self.messages and self.messages[0]["role"] == "system":
                 self.system = self.messages[0]["content"]
@@ -183,13 +183,6 @@ class ChatService:
         self.total_messages_tokens += message_tokens
         logger.debug(f"Added user message with {message_tokens} tokens")
         
-        # Log messages being sent to LLM
-        logger.info("=== MESSAGES BEING SENT TO LLM ===")
-        for i, msg in enumerate(self.messages):
-            logger.info(f"Message {i} ({msg['role']}):")
-            logger.info(msg['content'])
-        logger.info("=== END MESSAGES BEING SENT TO LLM ===")
-        
         # Get response from LLM
         logger.info("Getting response from LLM")
         completion = get_llm_response(messages=self.messages, model_name=self.model)
@@ -202,18 +195,6 @@ class ChatService:
         self.messages_token_counts.append(response_tokens)
         self.total_messages_tokens += response_tokens
         logger.debug(f"Added assistant response with {response_tokens} tokens")
-        
-        # Manage memory if needed
-        if self.total_messages_tokens >= self.max_message_tokens:
-            logger.info("Memory limit reached, performing rolling memory cleanup")
-            self.rolling_memory()
-        
-        # Final state verification
-        logger.info("=== PROCESS MESSAGE END STATE ===")
-        logger.info(f"System property: {self.system}")
-        if self.messages:
-            logger.info(f"Messages[0] content: {self.messages[0]['content']}")
-        logger.info("=== END PROCESS MESSAGE END STATE ===")
         
         return response
     
@@ -320,3 +301,20 @@ class ChatService:
         if match:
             return match.group(1).strip()
         return ""
+
+    def clear_context(self) -> None:
+        """Clear all scraped content from the chat context"""
+        logger.info("Clearing chat context")
+        
+        # Clear scraped content
+        self.scraped_content = {}
+        
+        # Update system message
+        self._update_system_message()
+        
+        logger.info("=== CLEAR CONTEXT VERIFICATION ===")
+        logger.info(f"Scraped content count: {len(self.scraped_content)}")
+        logger.info(f"System message preview: {self.system[:200]}...")
+        if self.messages:
+            logger.info(f"First message preview: {self.messages[0]['content'][:200]}...")
+        logger.info("=== END CLEAR CONTEXT VERIFICATION ===")

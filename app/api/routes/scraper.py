@@ -25,8 +25,9 @@ async def scrape_url(
 ) -> ScrapeResponse:
     """
     Submit a URL for scraping. Returns the scraped content immediately.
+    The URL will be associated with the specified conversation.
     """
-    logger.debug(f"Received scrape request for URL: {request.url}")
+    logger.debug(f"Received scrape request for URL: {request.url} in conversation: {request.conversation_id}")
     try:
         logger.info("Processing scrape request...")
         # Run the synchronous scrape_url in a thread pool
@@ -49,15 +50,17 @@ async def get_url_content(
     """
     Get the scraped content for a specific URL.
     """
-    try:
-        # Run the synchronous get_url_entry in a thread pool
-        loop = asyncio.get_running_loop()
-        entry = await loop.run_in_executor(
-            None,
-            partial(scraper_service.get_url_entry, url_id)
-        )
-        if not entry:
-            raise HTTPException(status_code=404, detail="Content not found")
-        return entry
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    url_entry = scraper_service.get_url_content(url_id)
+    if not url_entry:
+        raise HTTPException(status_code=404, detail="URL entry not found")
+    return url_entry
+
+@scraper_router.get("/conversation/{conversation_id}", response_model=List[URLEntry])
+async def get_conversation_urls(
+    conversation_id: str,
+    scraper_service: ScraperService = Depends(get_scraper_service)
+) -> List[URLEntry]:
+    """
+    Get all URLs associated with a specific conversation.
+    """
+    return scraper_service.get_conversation_urls(conversation_id)

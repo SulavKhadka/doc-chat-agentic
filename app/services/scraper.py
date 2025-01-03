@@ -1,162 +1,130 @@
-from bs4 import BeautifulSoup
-from markdownify import markdownify
-from typing import Dict, Optional, List
-from pydantic import UUID4
+import logging
+from typing import Optional
+from uuid import UUID, uuid4
+from app.models.scraper import ScrapeRequest, ScrapeResponse, URLEntry, URLStatus
 import json
-from datetime import datetime
+import os
 from pathlib import Path
 import requests
-import logging
-from uuid import uuid4
+from bs4 import BeautifulSoup
+from markdownify import markdownify as md
+from app.core.config import Settings
 
 logger = logging.getLogger(__name__)
 
-from app.core.config import settings
-from app.models.scraper import (
-    URLEntry,
-    ScrapeRequest,
-    ScrapeResponse,
-    ScrapingStatus
-)
-
 class ScraperService:
-    def __init__(self):
-        pass
+    def __init__(self, settings: Settings):
+        self.settings = settings
+        # Create storage directory if it doesn't exist
+        self.settings.STORAGE_DIR.mkdir(parents=True, exist_ok=True)
+        self.storage_path = self.settings.STORAGE_DIR / "urls.json"
+        self._ensure_storage_exists()
 
-    def _html_to_markdown(self, html_content: str) -> str:
-        """Convert HTML content to Markdown using markdownify"""
+    def _ensure_storage_exists(self):
+        """Ensure the storage directory and file exist"""
+        if not self.storage_path.exists():
+            # Create parent directories if they don't exist
+            self.storage_path.parent.mkdir(parents=True, exist_ok=True)
+            # Create the file with an empty list
+            with open(self.storage_path, 'w') as f:
+                json.dump([], f)
+
+    def _load_urls(self) -> list[URLEntry]:
+        """Load URLs from storage"""
         try:
-            logger.info("Converting HTML to Markdown using markdownify")
-            logger.debug(f"Input HTML preview (first 200 chars): {html_content[:200]}")
+            if not self.storage_path.exists():
+                self._ensure_storage_exists()
+                return []
             
-            # Clean the HTML first using BeautifulSoup
-            soup = BeautifulSoup(html_content, 'html.parser')
-            for tag in soup(['script', 'style']):
-                tag.decompose()
-            cleaned_html = str(soup)
-            
-            # Convert to markdown using markdownify
-            markdown = markdownify(cleaned_html, strip=['a', 'img'])
-            
-            if not markdown or markdown.isspace():
-                logger.error("Conversion resulted in empty markdown")
-                raise ValueError("Conversion resulted in empty markdown")
-                
-            logger.debug(f"Output Markdown preview: {markdown}")
-            return markdown
-        except Exception as e:
-            logger.error(f"Error converting HTML to Markdown: {str(e)}", exc_info=True)
-            # As a fallback, try using BeautifulSoup to extract text
-            try:
-                logger.info("Attempting fallback text extraction with BeautifulSoup")
-                soup = BeautifulSoup(html_content, 'html.parser')
-                # Remove unwanted elements
-                for tag in soup(['script', 'style']):
-                    tag.decompose()
-                # Get text with some basic formatting
-                text = soup.get_text(separator='\n\n')
-                return text
-            except Exception as fallback_error:
-                logger.error(f"Fallback extraction failed: {str(fallback_error)}")
-                return "Error: Could not convert content to readable format"
-    
-    def _save_content(self, entry: URLEntry) -> None:
-        """Save scraped content and URL to file"""
-        file_path = settings.SCRAPED_CONTENT_DIR / f"{entry.id}.json"
-        data = {
-            "document": {
-                "source": str(entry.url),
-                "document_content": entry.content if entry.content else "",
-                "last_updated": entry.last_updated.isoformat()
-            }
-        }
-        with open(file_path, "w") as f:
-            json.dump(data, f)
-    
-    def _load_content(self, entry_id: UUID4) -> Optional[dict]:
-        """Load scraped content and URL from file"""
-        file_path = settings.SCRAPED_CONTENT_DIR / f"{entry_id}.json"
-        if file_path.exists():
-            with open(file_path, "r") as f:
+            with open(self.storage_path, 'r') as f:
                 data = json.load(f)
-                return data["document"]
-        return None
-    
-    def _should_use_scraper_api(self, url: str) -> bool:
-        """Determine if we should use ScraperAPI for this URL"""
-        protected_domains = [
-            "rotogrinders.com",
-            "nba.com"
-            # Add other domains that need ScraperAPI here
-        ]
-        return any(domain in url.lower() for domain in protected_domains)
-    
-    def _scrape_with_scraper_api(self, url: str) -> str:
-        """Scrape a URL using ScraperAPI"""
-        payload = {
-            'api_key': settings.SCRAPER_API_KEY,
-            'url': url,
-            'render': True
-        }
-        response = requests.get('https://api.scraperapi.com/', params=payload, timeout=settings.SCRAPER_TIMEOUT)
-        text = response.text
-        return self._html_to_markdown(text)
-    
-    def _scrape_single_url(self, url: str) -> str:
-        """Scrape a single URL and return markdown content"""
-        logger.info(f"Scraping URL: {url}")
-        if self._should_use_scraper_api(url):
-            content = self._scrape_with_scraper_api(url)
-        else:
-            response = requests.get(url, timeout=settings.SCRAPER_TIMEOUT)
-            html = response.text
-            # Convert directly to markdown without intermediate soup step
-            content = self._html_to_markdown(html)
-        
-        if len(content) > settings.MAX_CONTENT_LENGTH:
-            logger.warning(f"Content exceeds max length ({len(content)} > {settings.MAX_CONTENT_LENGTH})")
-            content = content[:settings.MAX_CONTENT_LENGTH] + "..."
-        
-        return content
-    
-    def scrape_url(self, request: ScrapeRequest) -> ScrapeResponse:
-        """Process a single URL scraping request synchronously"""
-        entry = URLEntry(url=request.url)
-        
-        try:
-            # Perform scraping
-            content = self._scrape_single_url(str(request.url))
-            
-            # Update entry
-            entry.content = content
-            entry.status = ScrapingStatus.COMPLETE
-            entry.last_updated = datetime.now()
-            
-            # Save to file
-            self._save_content(entry)
-            
-            return ScrapeResponse(
-                url_entry=entry,
-                job_id=entry.id
-            )
+                return [URLEntry.model_validate(entry) for entry in data]
         except Exception as e:
-            entry.status = ScrapingStatus.ERROR
-            entry.error_message = str(e)
+            logger.error(f"Error loading URLs: {e}")
+            return []
+
+    def _save_urls(self, urls: list[URLEntry]):
+        """Save URLs to storage"""
+        try:
+            # Ensure parent directory exists
+            self.storage_path.parent.mkdir(parents=True, exist_ok=True)
+            
+            # Convert URLs to dict and save
+            with open(self.storage_path, 'w') as f:
+                json.dump([url.model_dump() for url in urls], f, default=str)
+        except Exception as e:
+            logger.error(f"Error saving URLs: {e}", exc_info=True)
             raise
-    
-    def get_url_entry(self, url_id: UUID4) -> Optional[URLEntry]:
-        """Get URL entry with content from file"""
-        data = self._load_content(url_id)
-        if data:
-            return URLEntry(
-                id=url_id,
-                url=data["source"],
-                status=ScrapingStatus.COMPLETE,
-                content=data["document_content"],
-                last_updated=datetime.fromisoformat(data["last_updated"])
-            )
-        return None
-    
-    def cleanup(self):
-        """Cleanup resources - no longer needed with requests"""
-        pass
+
+    def _get_url_entry(self, url_id: UUID) -> Optional[URLEntry]:
+        """Get a specific URL entry"""
+        urls = self._load_urls()
+        return next((url for url in urls if str(url.id) == str(url_id)), None)
+
+    def scrape_url(self, request: ScrapeRequest) -> ScrapeResponse:
+        """Scrape a URL and store its content"""
+        urls = self._load_urls()
+        
+        # Check if URL already exists for this conversation
+        existing_url = next(
+            (url for url in urls 
+             if url.url == request.url and url.conversation_id == request.conversation_id),
+            None
+        )
+
+        if existing_url and not request.force_refresh:
+            return ScrapeResponse(url_entry=existing_url)
+
+        # Create new URL entry or update existing one
+        url_entry = existing_url or URLEntry(
+            id=uuid4(),
+            url=request.url,
+            status=URLStatus.LOADING,
+            conversation_id=request.conversation_id
+        )
+
+        try:
+            # Use ScraperAPI for reliable scraping
+            api_url = f"http://api.scraperapi.com?api_key={self.settings.SCRAPER_API_KEY}&url={request.url}&render=true"
+            response = requests.get(api_url, timeout=60)  # Add timeout
+            response.raise_for_status()
+
+            # Save raw HTML
+            html_path = self.settings.SCRAPED_CONTENT_DIR / f"{url_entry.id}.html"
+            with open(html_path, 'w', encoding='utf-8') as f:
+                f.write(response.text)
+
+            # Parse HTML and convert to markdown
+            soup = BeautifulSoup(response.text, 'html.parser')
+            # Remove script and style elements
+            for script in soup(["script", "style"]):
+                script.decompose()
+
+            # Convert to markdown using markdownify
+            url_entry.content = md(str(soup), strip=['a', 'img'])
+            url_entry.status = URLStatus.COMPLETE
+            url_entry.error = None
+
+        except Exception as e:
+            logger.error(f"Error scraping URL {request.url}: {e}", exc_info=True)
+            url_entry.status = URLStatus.ERROR
+            url_entry.error = str(e)
+            url_entry.content = None
+
+        # Update storage
+        if existing_url:
+            urls = [url_entry if url.id == url_entry.id else url for url in urls]
+        else:
+            urls.append(url_entry)
+        
+        self._save_urls(urls)
+        return ScrapeResponse(url_entry=url_entry)
+
+    def get_url_content(self, url_id: UUID) -> Optional[URLEntry]:
+        """Get content for a specific URL"""
+        return self._get_url_entry(url_id)
+
+    def get_conversation_urls(self, conversation_id: str) -> list[URLEntry]:
+        """Get all URLs for a specific conversation"""
+        urls = self._load_urls()
+        return [url for url in urls if url.conversation_id == conversation_id]

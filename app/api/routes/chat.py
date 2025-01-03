@@ -45,6 +45,30 @@ async def send_message(
         logger.error(f"Error processing message: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
+@router.post("/context/clear")
+async def clear_context(
+    request: dict = Body(...),
+    chat_service: ChatService = Depends(get_chat_service)
+):
+    """
+    Clear the chat context for a conversation.
+    """
+    try:
+        logger.info("Clearing chat context")
+        
+        # Run the synchronous clear_context in a thread pool
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(
+            None,
+            chat_service.clear_context
+        )
+        
+        logger.info("Successfully cleared chat context")
+        return {"status": "success"}
+    except Exception as e:
+        logger.error(f"Error clearing context: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
 @router.post("/context/{url_id}")
 async def update_context(
     url_id: UUID,
@@ -61,26 +85,33 @@ async def update_context(
         loop = asyncio.get_running_loop()
         url_entry = await loop.run_in_executor(
             None,
-            partial(scraper_service.get_url_entry, url_id)
+            partial(scraper_service.get_url_content, url_id)
         )
+        
         if not url_entry:
             logger.warning(f"URL content not found for ID: {url_id}")
             raise HTTPException(status_code=404, detail="URL content not found")
         
-        logger.debug(f"Retrieved content for URL: {url_entry.url}")
-        content_preview = url_entry.content[:100] + "..." if url_entry.content and len(url_entry.content) > 100 else "No content"
-        logger.debug(f"Content preview: {content_preview}")
+        if url_entry.status != 'complete':
+            logger.warning(f"URL content not ready. Status: {url_entry.status}")
+            raise HTTPException(status_code=400, detail=f"URL content not ready. Status: {url_entry.status}")
         
-        # Add the content to chat context
+        if not url_entry.content:
+            logger.warning(f"URL has no content")
+            raise HTTPException(status_code=400, detail="URL has no content")
+        
+        logger.debug(f"Retrieved content for URL: {url_entry.url}")
+        
+        # Update the chat context with the URL content
+        loop = asyncio.get_running_loop()
         await loop.run_in_executor(
             None,
-            partial(chat_service.add_url_content, url_entry)
+            partial(chat_service.update_context, url_entry.url, url_entry.content)
         )
-        logger.info("Successfully updated context from URL")
         
-        return {"status": "success", "message": "Context updated successfully"}
-    except HTTPException:
-        raise
+        logger.info(f"Successfully updated context with URL content")
+        return {"status": "success"}
+        
     except Exception as e:
         logger.error(f"Error updating context from URL: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
@@ -103,7 +134,7 @@ async def remove_url_from_context(
         )
         logger.info("Successfully removed URL content from context")
         
-        return {"status": "success", "message": "URL content removed successfully"}
+        return {"status": "success"}
     except Exception as e:
         logger.error(f"Error removing URL content: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))

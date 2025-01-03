@@ -10,7 +10,7 @@ class Settings(BaseSettings):
     PROJECT_NAME: str = "NBA Chat Assistant"
     
     # CORS
-    BACKEND_CORS_ORIGINS: list = ["http://localhost:8501", "http://127.0.0.1:8000"]
+    BACKEND_CORS_ORIGINS: list = ["http://localhost:3000", "http://127.0.0.1:8000"]
     
     # OpenRouter
     OPENROUTER_API_KEY: str = OPENROUTER_API_KEY
