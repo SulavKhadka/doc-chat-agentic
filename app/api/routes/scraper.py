@@ -18,28 +18,19 @@ from app.api.dependencies import get_scraper_service
 
 scraper_router = APIRouter()
 
-@scraper_router.post("/url", response_model=ScrapeResponse)
+@scraper_router.post("/url")
 async def scrape_url(
     request: ScrapeRequest,
     scraper_service: ScraperService = Depends(get_scraper_service)
-) -> ScrapeResponse:
+):
     """
-    Submit a URL for scraping. Returns the scraped content immediately.
-    The URL will be associated with the specified conversation.
+    Scrape a URL and store its content
     """
-    logger.debug(f"Received scrape request for URL: {request.url} in conversation: {request.conversation_id}")
     try:
-        logger.info("Processing scrape request...")
-        # Run the synchronous scrape_url in a thread pool
-        loop = asyncio.get_running_loop()
-        response = await loop.run_in_executor(
-            None, 
-            partial(scraper_service.scrape_url, request)
-        )
-        logger.info(f"Successfully processed URL: {request.url}")
+        response = await scraper_service.scrape_url(request)
         return response
     except Exception as e:
-        logger.error(f"Error processing URL {request.url}: {str(e)}", exc_info=True)
+        logger.error(f"Error processing scrape request: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 @scraper_router.get("/content/{url_id}", response_model=URLEntry)

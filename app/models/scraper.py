@@ -1,6 +1,7 @@
+from enum import Enum
 from pydantic import BaseModel, UUID4
 from typing import Optional
-from enum import Enum
+from uuid import UUID
 
 class URLStatus(str, Enum):
     PENDING = "pending"
@@ -8,18 +9,19 @@ class URLStatus(str, Enum):
     COMPLETE = "complete"
     ERROR = "error"
 
-class ScrapeRequest(BaseModel):
-    url: str
-    force_refresh: bool = False
-    conversation_id: str
-
 class URLEntry(BaseModel):
-    id: UUID4
+    id: UUID
     url: str
     status: URLStatus
     conversation_id: str
-    content: Optional[str] = None
+    raw_content: Optional[str] = None  # Initial markdown content
+    content: Optional[str] = None      # LLM-cleaned content
     error: Optional[str] = None
+
+class ScrapeRequest(BaseModel):
+    url: str
+    conversation_id: str
+    force_refresh: bool = False
 
 class ScrapeResponse(BaseModel):
     url_entry: URLEntry

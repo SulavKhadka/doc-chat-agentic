@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import MarkdownMessage from './MarkdownMessage';
 
 interface URLEntry {
@@ -7,6 +7,7 @@ interface URLEntry {
   status: 'pending' | 'loading' | 'complete' | 'error';
   conversation_id: string;
   content?: string;
+  raw_content?: string;
   error?: string;
 }
 
@@ -33,6 +34,22 @@ const URLManager: React.FC<URLManagerProps> = ({
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editValue, setEditValue] = useState('');
   const [previewingId, setPreviewingId] = useState<string | null>(null);
+  const [showRawContent, setShowRawContent] = useState<Record<string, boolean>>({});
+
+  // Reset states when URL manager is collapsed
+  useEffect(() => {
+    if (!isExpanded) {
+      setPreviewingId(null);
+      setShowRawContent({});
+    }
+  }, [isExpanded]);
+
+  // Reset showRawContent for an entry when its preview is closed
+  useEffect(() => {
+    if (!previewingId) {
+      setShowRawContent({});
+    }
+  }, [previewingId]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -82,11 +99,23 @@ const URLManager: React.FC<URLManagerProps> = ({
   };
 
   const togglePreview = (entry: URLEntry) => {
-    setPreviewingId(previewingId === entry.id ? null : entry.id);
+    if (previewingId === entry.id) {
+      setPreviewingId(null);
+    } else {
+      setPreviewingId(entry.id);
+      setIsExpanded(true); // Ensure URL manager is expanded when preview is shown
+    }
+  };
+
+  const toggleContentVersion = (entryId: string) => {
+    setShowRawContent(prev => ({
+      ...prev,
+      [entryId]: !prev[entryId]
+    }));
   };
 
   return (
-    <div className={`border-t border-gray-700 ${previewingId ? 'h-[600px] flex flex-col' : ''}`}>
+    <div className="flex flex-col border-t border-gray-700">
       <button
         onClick={() => setIsExpanded(!isExpanded)}
         className="w-full px-4 py-2 flex items-center justify-between 
@@ -113,8 +142,8 @@ const URLManager: React.FC<URLManagerProps> = ({
       </button>
 
       {isExpanded && (
-        <div className={`bg-gray-800 border-t border-gray-700 ${previewingId ? 'flex-1 flex flex-col min-h-0' : ''}`}>
-          <form onSubmit={handleSubmit} className="p-4 border-b border-gray-700">
+        <div className="flex flex-col min-h-0 bg-gray-800 border-t border-gray-700">
+          <form onSubmit={handleSubmit} className="p-4 border-b border-gray-700 shrink-0">
             <div className="flex gap-2">
               <input
                 type="text"
@@ -138,100 +167,110 @@ const URLManager: React.FC<URLManagerProps> = ({
             </div>
           </form>
 
-          <div className={`${previewingId ? 'flex-1 flex flex-col min-h-0' : ''} p-4`}>
-            <div className={`space-y-2 ${previewingId ? 'h-full flex flex-col min-h-0' : 'max-h-60'} overflow-y-auto`}>
+          <div className="flex-1 min-h-0 p-4 overflow-hidden">
+            <div className={`space-y-2 overflow-y-auto ${previewingId ? 'h-[calc(100vh-25rem)]' : 'max-h-60'}`}>
               {urls.map((entry) => (
                 <div
                   key={entry.id}
-                  className={`p-3 bg-gray-700 rounded-lg shadow-sm hover:shadow-md transition-shadow
-                            ${previewingId === entry.id ? 'flex-1 flex flex-col min-h-0' : ''}`}
+                  className={`p-3 bg-gray-700 rounded-lg shadow-sm hover:shadow-md transition-shadow ${
+                    previewingId === entry.id ? 'flex flex-col' : ''
+                  }`}
                 >
-                  {editingId === entry.id ? (
-                    <div className="flex gap-2 mb-2">
-                      <input
-                        type="text"
-                        value={editValue}
-                        onChange={(e) => setEditValue(e.target.value)}
-                        className="flex-1 px-2 py-1 bg-gray-600 border border-gray-500 rounded 
-                                 text-gray-100 text-sm
-                                 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                      />
-                      <button
-                        onClick={() => handleSaveEdit(entry)}
-                        className="px-2 py-1 bg-green-600 text-gray-100 rounded hover:bg-green-700 
-                                 text-sm transition-colors"
-                      >
-                        Save
-                      </button>
-                      <button
-                        onClick={handleCancelEdit}
-                        className="px-2 py-1 bg-gray-600 text-gray-100 rounded hover:bg-gray-500 
-                                 text-sm transition-colors"
-                      >
-                        Cancel
-                      </button>
-                    </div>
-                  ) : (
-                    <div className="text-sm text-gray-100 truncate">{entry.url}</div>
-                  )}
-                  <div className="mt-2 flex justify-between items-center">
-                    <span
-                      className={`
-                        px-2 py-1 text-xs rounded-full
-                        ${
-                          entry.status === 'complete'
-                            ? 'bg-green-900/50 text-green-200'
-                            : entry.status === 'error'
-                            ? 'bg-red-900/50 text-red-200'
-                            : entry.status === 'loading'
-                            ? 'bg-yellow-900/50 text-yellow-200'
-                            : 'bg-gray-900/50 text-gray-200'
-                        }
-                      `}
-                    >
-                      {entry.status}
-                    </span>
-                    <div className="flex gap-1">
-                      {entry.status === 'complete' && (
+                  <div className={`${previewingId === entry.id ? 'flex-shrink-0' : ''}`}>
+                    {editingId === entry.id ? (
+                      <div className="flex gap-2 mb-2">
+                        <input
+                          type="text"
+                          value={editValue}
+                          onChange={(e) => setEditValue(e.target.value)}
+                          className="flex-1 px-2 py-1 bg-gray-600 border border-gray-500 rounded 
+                                   text-gray-100 text-sm
+                                   focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                        />
                         <button
-                          onClick={() => togglePreview(entry)}
-                          className={`p-1 hover:bg-gray-600 rounded-full transition-colors
-                                    ${previewingId === entry.id ? 'bg-gray-600' : ''}`}
-                          title={previewingId === entry.id ? "Hide content preview" : "Show content preview"}
+                          onClick={() => handleSaveEdit(entry)}
+                          className="px-2 py-1 bg-green-600 text-gray-100 rounded hover:bg-green-700 
+                                   text-sm transition-colors"
                         >
-                          👁️
+                          Save
                         </button>
-                      )}
-                      <button
-                        onClick={() => handleStartEdit(entry)}
-                        className="p-1 hover:bg-gray-600 rounded-full transition-colors"
-                        title="Edit URL"
+                        <button
+                          onClick={handleCancelEdit}
+                          className="px-2 py-1 bg-gray-600 text-gray-100 rounded hover:bg-gray-500 
+                                   text-sm transition-colors"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="text-sm text-gray-100 truncate">{entry.url}</div>
+                    )}
+                    <div className="mt-2 flex justify-between items-center">
+                      <span
+                        className={`
+                          px-2 py-1 text-xs rounded-full
+                          ${
+                            entry.status === 'complete'
+                              ? 'bg-green-900/50 text-green-200'
+                              : entry.status === 'error'
+                              ? 'bg-red-900/50 text-red-200'
+                              : entry.status === 'loading'
+                              ? 'bg-yellow-900/50 text-yellow-200'
+                              : 'bg-gray-900/50 text-gray-200'
+                          }
+                        `}
                       >
-                        ✏️
-                      </button>
-                      <button
-                        onClick={() => onRefreshUrl(entry)}
-                        className="p-1 hover:bg-gray-600 rounded-full transition-colors"
-                        title="Reprocess URL"
-                      >
-                        🔄
-                      </button>
-                      <button
-                        onClick={() => handleDelete(entry)}
-                        className="p-1 hover:bg-gray-600 rounded-full transition-colors text-red-400"
-                        title="Delete URL"
-                      >
-                        🗑️
-                      </button>
+                        {entry.status}
+                      </span>
+                      <div className="flex gap-1">
+                        {entry.status === 'complete' && (
+                          <button
+                            onClick={() => togglePreview(entry)}
+                            className={`p-1 hover:bg-gray-600 rounded-full transition-colors
+                                      ${previewingId === entry.id ? 'bg-gray-600' : ''}`}
+                            title={previewingId === entry.id ? "Hide content preview" : "Show content preview"}
+                          >
+                            👁️
+                          </button>
+                        )}
+                        <button
+                          onClick={() => handleStartEdit(entry)}
+                          className="p-1 hover:bg-gray-600 rounded-full transition-colors"
+                          title="Edit URL"
+                        >
+                          ✏️
+                        </button>
+                        <button
+                          onClick={() => onRefreshUrl(entry)}
+                          className="p-1 hover:bg-gray-600 rounded-full transition-colors"
+                          title="Reprocess URL"
+                        >
+                          🔄
+                        </button>
+                        <button
+                          onClick={() => handleDelete(entry)}
+                          className="p-1 hover:bg-gray-600 rounded-full transition-colors text-red-400"
+                          title="Delete URL"
+                        >
+                          🗑️
+                        </button>
+                      </div>
                     </div>
                   </div>
 
-                  {/* Content Preview */}
-                  {previewingId === entry.id && entry.content && (
-                    <div className="mt-3 border-t border-gray-600 pt-3 flex-1 min-h-0 overflow-y-auto">
-                      <div className="prose prose-invert max-w-none">
+                  {previewingId === entry.id && (entry.content || entry.raw_content) && (
+                    <div className="mt-4 flex-1 min-h-0 flex flex-col">
+                      <div className="flex justify-between items-center flex-shrink-0">
+                        <button
+                          onClick={() => toggleContentVersion(entry.id)}
+                          className="text-sm text-gray-300 hover:text-gray-100"
+                        >
+                          {showRawContent[entry.id] ? 'Show Processed Content' : 'Show Raw Content'}
+                        </button>
+                      </div>
+                      <div className="mt-2 flex-1 bg-gray-800 rounded-lg p-4 overflow-y-auto overflow-x-hidden whitespace-pre-wrap">
                         <MarkdownMessage
-                          content={entry.content}
+                          content={showRawContent[entry.id] ? entry.raw_content! : entry.content!}
                           isAssistant={true}
                         />
                       </div>

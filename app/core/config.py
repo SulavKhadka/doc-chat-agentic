@@ -26,7 +26,7 @@ class Settings(BaseSettings):
     
     # Model settings
     DEFAULT_MODEL: str = "deepseek/deepseek-chat"
-    MAX_TOKENS: int = 1000
+    MAX_TOKENS: int = 32768
     TEMPERATURE: float = 0.2
     
     # Scraping settings

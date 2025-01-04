@@ -2,6 +2,7 @@ from typing import AsyncGenerator
 from app.services.scraper import ScraperService
 from app.services.chat import ChatService
 from app.core.config import settings, Settings
+from app.services.llm import LLMService
 
 NBA_SYSTEM_PROMPT = """You are an AI assistant specialized in sports betting analysis, working alongside a user who has practical experience but lacks formal academic training in statistics, data analysis, and game theory. Your role is to complement the user's knowledge, push them to do better, providing insights and analysis based on the given data. You will be analyzing various types of sports-related information, including game statistics, forecasts, injury reports, and news articles for sports like NBA, NFL, and soccer.
 
@@ -52,3 +53,6 @@ async def get_scraper_service() -> AsyncGenerator[ScraperService, None]:
 async def get_chat_service() -> ChatService:
     """Return the singleton chat service instance"""
     return _chat_service
+
+def get_llm_service():
+    return LLMService()

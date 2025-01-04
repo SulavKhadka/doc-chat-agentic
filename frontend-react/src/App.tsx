@@ -57,10 +57,30 @@ const App: React.FC = () => {
     scrollToBottom();
   }, [messages]);
 
+  const generateTopicForConversation = async (messages: Message[]) => {
+    try {
+      const response = await fetch('/api/v1/chat/generate-topic', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ messages }),
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
+      return data.topic;
+    } catch (error) {
+      console.error('Failed to generate topic:', error);
+      return null;
+    }
+  };
+
   const handleNewConversation = () => {
     const newConversation: Conversation = {
       id: Date.now().toString(),
-      title: `Conversation ${conversations.length + 1}`,
+      title: `New Conversation`,
       lastMessage: '',
       timestamp: new Date().toISOString(),
       messages: [],
@@ -322,6 +342,12 @@ const App: React.FC = () => {
 
       const finalMessages = [...updatedMessages, assistantMessage];
       
+      // Generate new topic after assistant response if this is the first exchange
+      let newTitle = null;
+      if (finalMessages.length <= 2) {
+        newTitle = await generateTopicForConversation(finalMessages);
+      }
+      
       setMessages(finalMessages);
       setConversations(prevConversations =>
         prevConversations.map(conv =>
@@ -331,6 +357,7 @@ const App: React.FC = () => {
                 messages: finalMessages,
                 lastMessage: assistantMessage.content,
                 timestamp: assistantMessage.timestamp,
+                ...(newTitle && { title: newTitle }),
               }
             : conv
         )

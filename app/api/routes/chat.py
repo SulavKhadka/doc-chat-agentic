@@ -3,7 +3,8 @@ from uuid import UUID
 import logging
 from app.services.chat import ChatService
 from app.services.scraper import ScraperService
-from app.api.dependencies import get_chat_service, get_scraper_service
+from app.services.llm import LLMService
+from app.api.dependencies import get_chat_service, get_scraper_service, get_llm_service
 from app.models.chat import ChatRequest, ChatResponse
 from app.models.scraper import URLEntry
 import asyncio
@@ -137,4 +138,27 @@ async def remove_url_from_context(
         return {"status": "success"}
     except Exception as e:
         logger.error(f"Error removing URL content: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/generate-topic")
+async def generate_topic(
+    conversation: dict = Body(...),
+    llm_service: LLMService = Depends(get_llm_service)
+):
+    """
+    Generate a topic for a conversation using LLM.
+    """
+    try:
+        logger.info("Generating topic for conversation")
+        conversation_text = "\n".join([
+            f"{msg['role']}: {msg['content']}"
+            for msg in conversation.get('messages', [])
+        ])
+        
+        topic = await llm_service.generate_topic(conversation_text)
+        logger.info(f"Generated topic: {topic}")
+        
+        return {"topic": topic}
+    except Exception as e:
+        logger.error(f"Error generating topic: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))

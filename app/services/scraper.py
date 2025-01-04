@@ -9,6 +9,7 @@ import requests
 from bs4 import BeautifulSoup
 from markdownify import markdownify as md
 from app.core.config import Settings
+from app.services.llm import llm_service
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +62,7 @@ class ScraperService:
         urls = self._load_urls()
         return next((url for url in urls if str(url.id) == str(url_id)), None)
 
-    def scrape_url(self, request: ScrapeRequest) -> ScrapeResponse:
+    async def scrape_url(self, request: ScrapeRequest) -> ScrapeResponse:
         """Scrape a URL and store its content"""
         urls = self._load_urls()
         
@@ -93,23 +94,42 @@ class ScraperService:
             html_path = self.settings.SCRAPED_CONTENT_DIR / f"{url_entry.id}.html"
             with open(html_path, 'w', encoding='utf-8') as f:
                 f.write(response.text)
+            url_entry.raw_content = response.text
 
             # Parse HTML and convert to markdown
             soup = BeautifulSoup(response.text, 'html.parser')
+            
             # Remove script and style elements
             for script in soup(["script", "style"]):
                 script.decompose()
+                
+            # Special handling for NBA.com websites
+            if 'nba.com' in request.url.lower():
+                # Remove navigation dropdowns and menus
+                for dropdown in soup.find_all(class_=lambda x: x and ('dropdown' in x.lower())):
+                    dropdown.decompose()
 
             # Convert to markdown using markdownify
-            url_entry.content = md(str(soup), strip=['a', 'img'])
+            markdown_content = md(str(soup), strip=['a', 'img'])
+            
+            # Use LLM to clean up the content
+            url_entry.content = markdown_content
             url_entry.status = URLStatus.COMPLETE
             url_entry.error = None
+
+            # Save both versions to separate files for debugging/comparison
+            raw_path = self.settings.SCRAPED_CONTENT_DIR / f"{url_entry.id}_raw.md"
+            clean_path = self.settings.SCRAPED_CONTENT_DIR / f"{url_entry.id}_clean.md"
+            
+            with open(raw_path, 'w', encoding='utf-8') as f:
+                f.write(markdown_content)
 
         except Exception as e:
             logger.error(f"Error scraping URL {request.url}: {e}", exc_info=True)
             url_entry.status = URLStatus.ERROR
             url_entry.error = str(e)
             url_entry.content = None
+            url_entry.raw_content = None
 
         # Update storage
         if existing_url:
